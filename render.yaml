@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: hfv-api
+    runtime: docker
+    dockerfilePath: infra/api.Dockerfile
+    healthCheckPath: /ready
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: FRED_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false

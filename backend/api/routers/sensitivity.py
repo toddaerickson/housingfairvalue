@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from backend.calc.affordability import piti
 from backend.calc.composite import compute_composite
 
 from ..db import load_monthly_fact
 
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/sensitivity", tags=["sensitivity"])
 
 
@@ -119,7 +122,8 @@ def _bisect_to_zero(f, lo: float, hi: float, tol: float = 1e-3, max_iter: int = 
 
 
 @router.get("/breakpoints")
-def breakpoints():
+@limiter.limit("10/minute")
+def breakpoints(request: Request):
     """Three live numbers: rate / income / price-decline that neutralize composite."""
     monthly, comp = _latest()
     last = monthly.iloc[-1]
@@ -188,7 +192,9 @@ def years_to_fv(
 
 
 @router.post("/montecarlo")
+@limiter.limit("5/minute")
 def montecarlo(
+    request: Request,
     n_paths: int = Query(5000, ge=100, le=20000),
     horizon_years: int = Query(15, ge=1, le=30),
     seed: int = Query(42),

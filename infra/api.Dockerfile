@@ -4,9 +4,9 @@ RUN useradd --create-home --shell /usr/sbin/nologin app
 WORKDIR /app
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e .
-
 COPY backend ./backend
+RUN pip install --no-cache-dir .
+
 RUN chown -R app:app /app
 
 USER app

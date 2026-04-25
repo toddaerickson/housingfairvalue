@@ -1,5 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS timescaledb;
-
 CREATE TABLE series (
     id            TEXT PRIMARY KEY,
     label         TEXT NOT NULL,
@@ -15,7 +13,6 @@ CREATE TABLE observation (
     value       DOUBLE PRECISION,
     PRIMARY KEY (series_id, obs_date)
 );
-SELECT create_hypertable('observation', 'obs_date', chunk_time_interval => INTERVAL '10 years');
 CREATE INDEX observation_series_date_idx ON observation (series_id, obs_date DESC);
 
 CREATE TABLE monthly_fact (
@@ -30,7 +27,6 @@ CREATE TABLE monthly_fact (
     cpi                   DOUBLE PRECISION,
     real_dpi_per_capita   DOUBLE PRECISION
 );
-SELECT create_hypertable('monthly_fact', 'obs_date', chunk_time_interval => INTERVAL '10 years');
 
 CREATE TABLE composite_history (
     obs_date            DATE PRIMARY KEY,
@@ -41,7 +37,6 @@ CREATE TABLE composite_history (
     overvaluation_pct   DOUBLE PRECISION NOT NULL,
     percentile_rank     DOUBLE PRECISION NOT NULL
 );
-SELECT create_hypertable('composite_history', 'obs_date', chunk_time_interval => INTERVAL '10 years');
 
 INSERT INTO series (id, label, unit, frequency, notes) VALUES
   ('MSPUS',                  'Median sale price, existing homes',     'USD',           'Q', NULL),

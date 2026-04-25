@@ -4,8 +4,9 @@ Run:
     python -m backend.ingest.fred --backfill              # full history 1980->today
     python -m backend.ingest.fred --since 2024-01-01      # incremental
 
-Reads FRED_API_KEY from env. Writes raw observations to `observation` and a
-joined monthly grid to `monthly_fact`.
+Reads FRED_API_KEY from env. Writes raw observations to `observation`, a
+joined monthly grid to `monthly_fact`, and materialized composite scores
+to `composite_history` — all within a single DB transaction.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from datetime import date
 
 import pandas as pd
 from fredapi import Fred
-from sqlalchemy import create_engine, text
+from sqlalchemy import Connection, create_engine, text
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,19 @@ SERIES = {
 START_DATE = date(1980, 1, 1)
 INCOME_SPLICE_DATE = pd.Timestamp("1984-01-01")
 
+# Range validation bounds per series (min, max)
+VALIDATION_BOUNDS: dict[str, tuple[float, float]] = {
+    "MSPUS":                (10_000, 2_000_000),
+    "MEHOINUSA646N":        (1_000, 500_000),
+    "MORTGAGE30US":         (0.1, 30.0),
+    "CUSR0000SEHC":         (0.01, 1_000),
+    "CSUSHPINSA":           (0.01, 1_000),
+    "USAUCSFRCONDOSMSAMID": (1_000, 5_000_000),
+    "DGS10":                (0.01, 30.0),
+    "CPIAUCSL":             (0.01, 1_000),
+    "A229RX0":              (100, 200_000),
+}
+
 
 @dataclass(frozen=True)
 class Config:
@@ -55,11 +69,28 @@ class Config:
         return cls(fred_api_key=key, database_url=url)
 
 
+def validate_series(series_id: str, s: pd.Series) -> pd.Series:
+    """Drop observations that fall outside expected bounds."""
+    bounds = VALIDATION_BOUNDS.get(series_id)
+    if bounds is None:
+        return s
+    lo, hi = bounds
+    mask = (s >= lo) & (s <= hi)
+    n_dropped = (~mask).sum()
+    if n_dropped > 0:
+        log.warning(
+            "validation: dropped %d/%d rows from %s outside [%s, %s]",
+            n_dropped, len(s), series_id, lo, hi,
+        )
+    return s[mask]
+
+
 def fetch_series(fred: Fred, series_id: str, start: date) -> pd.Series:
     s = fred.get_series(series_id, observation_start=start)
     s.name = series_id
     s.index = pd.to_datetime(s.index)
-    return s.dropna()
+    s = s.dropna()
+    return validate_series(series_id, s)
 
 
 def to_monthly(s: pd.Series, freq: str) -> pd.Series:
@@ -132,33 +163,35 @@ def _chunked(rows: list[dict], n: int = _INSERT_CHUNK):
         yield rows[i:i + n]
 
 
-def write_observations(engine, raw: dict[str, pd.Series]) -> None:
+def write_observations(conn: Connection, raw: dict[str, pd.Series]) -> int:
+    """Write raw FRED observations. Returns row count."""
     rows: list[dict] = []
     for sid, s in raw.items():
         for ts, v in s.items():
             rows.append({"series_id": sid, "obs_date": ts.date(), "value": float(v)})
     if not rows:
-        return
+        return 0
     sql = text("""
         INSERT INTO observation (series_id, obs_date, value)
         VALUES (:series_id, :obs_date, :value)
         ON CONFLICT (series_id, obs_date) DO UPDATE SET value = EXCLUDED.value
     """)
-    with engine.begin() as conn:
-        for chunk in _chunked(rows):
-            conn.execute(sql, chunk)
+    for chunk in _chunked(rows):
+        conn.execute(sql, chunk)
+    return len(rows)
 
 
-def write_monthly_fact(engine, df: pd.DataFrame) -> None:
+def write_monthly_fact(conn: Connection, df: pd.DataFrame) -> int:
+    """Write monthly fact grid. Returns row count."""
     if df.empty:
-        return
+        return 0
     cols = list(df.columns)
     bad = set(cols) - ALLOWED_FACT_COLS
     if bad:
         raise ValueError(f"monthly_fact has unexpected columns: {sorted(bad)}")
     df = df.dropna(how="all")
     if df.empty:
-        return
+        return 0
     payload = [
         {"obs_date": ts.date(), **{c: (None if pd.isna(row[c]) else float(row[c])) for c in cols}}
         for ts, row in df.iterrows()
@@ -169,23 +202,90 @@ def write_monthly_fact(engine, df: pd.DataFrame) -> None:
         f"VALUES (:obs_date, {', '.join(':' + c for c in cols)}) "
         f"ON CONFLICT (obs_date) DO UPDATE SET {set_clause}"
     )
-    with engine.begin() as conn:
-        for chunk in _chunked(payload):
-            conn.execute(sql, chunk)
+    for chunk in _chunked(payload):
+        conn.execute(sql, chunk)
+    return len(payload)
 
 
-def run(start: date, write: bool = True) -> pd.DataFrame:
+def materialize_composite(conn: Connection) -> int:
+    """Read all monthly_fact rows, compute composite, and upsert into composite_history.
+
+    Does a FULL recompute (not append) because z-score baselines (mean/std) shift
+    as new data extends the history window.
+    """
+    from backend.calc.composite import compute_composite
+
+    df = pd.read_sql(
+        "SELECT obs_date, median_price, median_income, mortgage_rate_30y, "
+        "oer_index, cs_hpi, zhvi, treasury_10y, cpi, real_dpi_per_capita "
+        "FROM monthly_fact ORDER BY obs_date",
+        conn,
+        parse_dates=["obs_date"],
+    ).set_index("obs_date")
+
+    if df.empty:
+        return 0
+
+    comp = compute_composite(df)
+    if comp.empty:
+        return 0
+
+    rows = [
+        {
+            "obs_date": ts.date(),
+            "z_affordability": float(row["z_affordability"]),
+            "z_price_income": float(row["z_price_income"]),
+            "z_price_rent": float(row["z_price_rent"]),
+            "composite_z": float(row["composite_z"]),
+            "overvaluation_pct": float(row["overvaluation_pct"]),
+            "percentile_rank": float(row["percentile_rank"]),
+        }
+        for ts, row in comp.iterrows()
+    ]
+    sql = text("""
+        INSERT INTO composite_history
+            (obs_date, z_affordability, z_price_income, z_price_rent,
+             composite_z, overvaluation_pct, percentile_rank)
+        VALUES
+            (:obs_date, :z_affordability, :z_price_income, :z_price_rent,
+             :composite_z, :overvaluation_pct, :percentile_rank)
+        ON CONFLICT (obs_date) DO UPDATE SET
+            z_affordability = EXCLUDED.z_affordability,
+            z_price_income = EXCLUDED.z_price_income,
+            z_price_rent = EXCLUDED.z_price_rent,
+            composite_z = EXCLUDED.composite_z,
+            overvaluation_pct = EXCLUDED.overvaluation_pct,
+            percentile_rank = EXCLUDED.percentile_rank
+    """)
+    for chunk in _chunked(rows):
+        conn.execute(sql, chunk)
+    log.info("materialized %d composite_history rows", len(rows))
+    return len(rows)
+
+
+def run(start: date, write: bool = True) -> tuple[pd.DataFrame, int, int, int]:
+    """Fetch FRED data and optionally write to DB.
+
+    Returns (monthly_df, rows_obs, rows_fact, rows_composite).
+    """
     cfg = Config.from_env()
     fred = Fred(api_key=cfg.fred_api_key)
     raw = {sid: fetch_series(fred, sid, start) for sid in SERIES}
     monthly = build_monthly_fact(raw)
 
+    rows_obs = rows_fact = rows_composite = 0
     if write:
-        engine = create_engine(cfg.database_url)
-        write_observations(engine, raw)
-        write_monthly_fact(engine, monthly)
-        log.info("wrote %d monthly rows (%s..%s)", len(monthly), monthly.index.min(), monthly.index.max())
-    return monthly
+        eng = create_engine(cfg.database_url)
+        with eng.begin() as conn:
+            rows_obs = write_observations(conn, raw)
+            rows_fact = write_monthly_fact(conn, monthly)
+            rows_composite = materialize_composite(conn)
+        log.info(
+            "wrote %d obs, %d fact, %d composite rows (%s..%s)",
+            rows_obs, rows_fact, rows_composite,
+            monthly.index.min(), monthly.index.max(),
+        )
+    return monthly, rows_obs, rows_fact, rows_composite
 
 
 def main() -> None:

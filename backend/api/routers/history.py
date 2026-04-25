@@ -9,7 +9,7 @@ from backend.calc.composite import compute_composite
 from backend.calc.ratios import oer_to_dollar_rent
 from backend.calc.regimes import REGIMES
 
-from ..db import load_monthly_fact
+from ..db import engine, load_monthly_fact
 
 router = APIRouter(prefix="/history", tags=["history"])
 
@@ -42,17 +42,35 @@ def _require_data() -> pd.DataFrame:
     return monthly
 
 
+def _load_composite_history() -> pd.DataFrame:
+    """Load pre-materialized composite from DB; fall back to live compute if empty."""
+    try:
+        df = pd.read_sql(
+            "SELECT obs_date, z_affordability, z_price_income, z_price_rent, "
+            "composite_z, overvaluation_pct, percentile_rank "
+            "FROM composite_history ORDER BY obs_date",
+            engine(),
+            parse_dates=["obs_date"],
+        )
+        if not df.empty:
+            return df.set_index("obs_date")
+    except Exception:
+        pass
+    # Fallback: compute live (bootstrap safety before first ingest)
+    monthly = _require_data()
+    return compute_composite(monthly)
+
+
 @router.get("/composite")
 def composite(
     start: str | None = Query("1980-01-01"),
     end: str | None = Query(None),
 ):
-    monthly = _require_data()
-    s = _parse_date("start", start)
-    e = _parse_date("end", end)
-    comp = compute_composite(monthly)
+    comp = _load_composite_history()
     if comp.empty:
         raise HTTPException(status_code=503, detail="composite history is empty")
+    s = _parse_date("start", start)
+    e = _parse_date("end", end)
     sliced = comp.loc[s:e] if (s is not None or e is not None) else comp
     return {"data": _records(sliced)}
 
@@ -75,7 +93,7 @@ def series(
 @router.get("/kpi")
 def kpi():
     monthly = _require_data()
-    comp = compute_composite(monthly)
+    comp = _load_composite_history()
     if comp.empty:
         raise HTTPException(status_code=503, detail="composite history is empty")
     last_date = comp.index[-1]
@@ -96,7 +114,7 @@ def kpi():
 @router.get("/regimes")
 def regimes():
     monthly = _require_data()
-    comp = compute_composite(monthly)
+    comp = _load_composite_history()
     if comp.empty:
         raise HTTPException(status_code=503, detail="composite history is empty")
     out = []

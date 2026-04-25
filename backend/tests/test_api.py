@@ -24,8 +24,10 @@ def client() -> TestClient:
 
 
 def _patch_loader(monkeypatch, df: pd.DataFrame) -> None:
+    from backend.calc.composite import compute_composite
     monkeypatch.setattr(history, "load_monthly_fact", lambda: df)
     monkeypatch.setattr(sensitivity, "load_monthly_fact", lambda: df)
+    monkeypatch.setattr(history, "_load_composite_history", lambda: compute_composite(df))
 
 
 @pytest.fixture

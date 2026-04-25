@@ -17,7 +17,7 @@ import pytest
 from backend.calc.composite import compute_composite
 from backend.calc.regimes import REGIMES
 
-EARLY_REGIME_NAMES = {"1980 affordability trough"}
+EARLY_REGIME_NAMES = {"1983 affordability trough"}
 EARLY_FALLBACK = pd.Timedelta(days=35)
 
 

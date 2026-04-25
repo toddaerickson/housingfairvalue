@@ -29,7 +29,7 @@ from .affordability import dti
 from .ratios import price_to_income, price_to_rent
 
 DEFAULT_BASELINE_START = pd.Timestamp("1980-01-01")
-DEFAULT_PCT_PER_SIGMA = 19.0  # % overvaluation per 1σ; calibrated by validation gate
+DEFAULT_PCT_PER_SIGMA = 28.0  # % overvaluation per 1σ; calibrated 2026-04-25 against real FRED data
 
 
 @dataclass(frozen=True)
