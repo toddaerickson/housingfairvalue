@@ -1,7 +1,8 @@
-import React from "react";
+import { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
+import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import ErrorBoundary from "./components/ErrorBoundary";
 import History from "./pages/History";
 import Sensitivity from "./pages/Sensitivity";
 import Methodology from "./pages/Methodology";
@@ -17,28 +18,38 @@ function Shell() {
       <header>
         <h1>Housing Fair Value</h1>
         <nav>
-          <NavLink to="/">History</NavLink>
-          <NavLink to="/sensitivity">Sensitivity</NavLink>
-          <NavLink to="/methodology">Methodology</NavLink>
+          <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
+            History
+          </NavLink>
+          <NavLink to="/sensitivity" className={({ isActive }) => (isActive ? "active" : "")}>
+            Sensitivity
+          </NavLink>
+          <NavLink to="/methodology" className={({ isActive }) => (isActive ? "active" : "")}>
+            Methodology
+          </NavLink>
         </nav>
       </header>
       <main>
-        <Routes>
-          <Route path="/" element={<History />} />
-          <Route path="/sensitivity" element={<Sensitivity />} />
-          <Route path="/methodology" element={<Methodology />} />
-        </Routes>
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/" element={<History />} />
+            <Route path="/sensitivity" element={<Sensitivity />} />
+            <Route path="/methodology" element={<Methodology />} />
+          </Routes>
+        </ErrorBoundary>
       </main>
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
+const rootEl = document.getElementById("root");
+if (!rootEl) throw new Error('#root element missing in index.html');
+ReactDOM.createRoot(rootEl).render(
+  <StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Shell />
       </BrowserRouter>
     </QueryClientProvider>
-  </React.StrictMode>,
+  </StrictMode>,
 );

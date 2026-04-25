@@ -49,7 +49,9 @@ class Config:
         key = os.environ.get("FRED_API_KEY")
         if not key:
             raise SystemExit("FRED_API_KEY not set")
-        url = os.environ.get("DATABASE_URL", "postgresql+psycopg://hfv:hfv@localhost:5432/hfv")
+        url = os.environ.get("DATABASE_URL")
+        if not url:
+            raise SystemExit("DATABASE_URL not set")
         return cls(fred_api_key=key, database_url=url)
 
 
@@ -61,40 +63,40 @@ def fetch_series(fred: Fred, series_id: str, start: date) -> pd.Series:
 
 
 def to_monthly(s: pd.Series, freq: str) -> pd.Series:
-    """Resample a series to a monthly grid using rules appropriate to its native freq.
+    """Resample a series to a monthly grid.
 
-    - D/W: month-end last value (proxies weekly mortgage rate, daily 10y treasury).
-    - M: month-end as is.
-    - Q/A: forward-fill within the reporting period (no linear interpolation).
+    - D/W/M: month-end last value (mortgage rate weekly, treasury daily, OER monthly).
+    - Q/A: forward-fill *and* back-fill within the reporting period so the first
+      observation propagates into earlier months of the same period rather than
+      being dropped (FRED quarterly/annual stamps are typically at period start;
+      `resample("ME")` would otherwise leave the period's leading months NaN).
     """
-    if freq in ("D", "W"):
-        return s.resample("ME").last()
-    if freq == "M":
+    if freq in ("D", "W", "M"):
         return s.resample("ME").last()
     if freq in ("Q", "A"):
-        return s.resample("ME").ffill()
+        return s.resample("ME").ffill().bfill()
     raise ValueError(f"unknown freq: {freq}")
 
 
 def stitch_income(median_income_m: pd.Series, real_dpi_m: pd.Series) -> pd.Series:
     """Backfill MEHOINUSA646N (1984+) with A229RX0 scaled at the splice point.
 
-    Scales the real DPI per capita series to dollar-match median household
-    income at January 1984, the first available month of the household income
-    series. Pre-1984 values use the scaled DPI; 1984+ uses the actual median
-    income series unchanged.
+    Anchors on the *first non-NaN month* of the median household income series
+    (rather than a hardcoded date) since the actual splice month varies with
+    FRED's reporting cadence and our resampling rules. Pre-splice values use
+    the scaled DPI; post-splice values are unchanged.
     """
-    if median_income_m.empty or real_dpi_m.empty:
+    if median_income_m.dropna().empty or real_dpi_m.dropna().empty:
         return median_income_m
 
-    splice = INCOME_SPLICE_DATE.to_period("M").to_timestamp("M")
-    if splice not in median_income_m.index or splice not in real_dpi_m.index:
-        log.warning("Income splice point %s missing — returning unspliced series", splice)
+    splice = median_income_m.dropna().index.min()
+    if splice not in real_dpi_m.index or pd.isna(real_dpi_m.loc[splice]):
+        log.warning("Income splice anchor %s not in real DPI — returning unspliced", splice)
         return median_income_m
 
     scale = median_income_m.loc[splice] / real_dpi_m.loc[splice]
-    pre = real_dpi_m.loc[:splice - pd.Timedelta(days=1)] * scale
-    return pd.concat([pre, median_income_m]).sort_index()
+    pre = real_dpi_m.loc[real_dpi_m.index < splice] * scale
+    return pd.concat([pre, median_income_m.dropna()]).sort_index()
 
 
 def build_monthly_fact(raw: dict[str, pd.Series]) -> pd.DataFrame:
@@ -117,6 +119,19 @@ def build_monthly_fact(raw: dict[str, pd.Series]) -> pd.DataFrame:
     return df.loc[df.index >= pd.Timestamp(START_DATE)]
 
 
+_INSERT_CHUNK = 1000
+
+ALLOWED_FACT_COLS = {
+    "median_price", "median_income", "mortgage_rate_30y", "oer_index",
+    "cs_hpi", "zhvi", "treasury_10y", "cpi", "real_dpi_per_capita",
+}
+
+
+def _chunked(rows: list[dict], n: int = _INSERT_CHUNK):
+    for i in range(0, len(rows), n):
+        yield rows[i:i + n]
+
+
 def write_observations(engine, raw: dict[str, pd.Series]) -> None:
     rows: list[dict] = []
     for sid, s in raw.items():
@@ -124,30 +139,39 @@ def write_observations(engine, raw: dict[str, pd.Series]) -> None:
             rows.append({"series_id": sid, "obs_date": ts.date(), "value": float(v)})
     if not rows:
         return
+    sql = text("""
+        INSERT INTO observation (series_id, obs_date, value)
+        VALUES (:series_id, :obs_date, :value)
+        ON CONFLICT (series_id, obs_date) DO UPDATE SET value = EXCLUDED.value
+    """)
     with engine.begin() as conn:
-        conn.execute(text("""
-            INSERT INTO observation (series_id, obs_date, value)
-            VALUES (:series_id, :obs_date, :value)
-            ON CONFLICT (series_id, obs_date) DO UPDATE SET value = EXCLUDED.value
-        """), rows)
+        for chunk in _chunked(rows):
+            conn.execute(sql, chunk)
 
 
 def write_monthly_fact(engine, df: pd.DataFrame) -> None:
     if df.empty:
         return
     cols = list(df.columns)
+    bad = set(cols) - ALLOWED_FACT_COLS
+    if bad:
+        raise ValueError(f"monthly_fact has unexpected columns: {sorted(bad)}")
+    df = df.dropna(how="all")
+    if df.empty:
+        return
     payload = [
         {"obs_date": ts.date(), **{c: (None if pd.isna(row[c]) else float(row[c])) for c in cols}}
         for ts, row in df.iterrows()
     ]
     set_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols)
-    sql = f"""
-        INSERT INTO monthly_fact (obs_date, {", ".join(cols)})
-        VALUES (:obs_date, {", ".join(":" + c for c in cols)})
-        ON CONFLICT (obs_date) DO UPDATE SET {set_clause}
-    """
+    sql = text(
+        f"INSERT INTO monthly_fact (obs_date, {', '.join(cols)}) "
+        f"VALUES (:obs_date, {', '.join(':' + c for c in cols)}) "
+        f"ON CONFLICT (obs_date) DO UPDATE SET {set_clause}"
+    )
     with engine.begin() as conn:
-        conn.execute(text(sql), payload)
+        for chunk in _chunked(payload):
+            conn.execute(sql, chunk)
 
 
 def run(start: date, write: bool = True) -> pd.DataFrame:

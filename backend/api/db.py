@@ -12,7 +12,9 @@ from sqlalchemy.engine import Engine
 
 @lru_cache(maxsize=1)
 def engine() -> Engine:
-    url = os.environ.get("DATABASE_URL", "postgresql+psycopg://hfv:hfv@localhost:5432/hfv")
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise RuntimeError("DATABASE_URL is not set")
     return create_engine(url, pool_pre_ping=True)
 
 

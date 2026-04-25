@@ -1,18 +1,21 @@
 """Composite z-score blending the three valuation lenses.
 
-  z_lens     = (lens - mean(lens)) / std(lens)
+  z_lens     = (lens - mean(lens)) / std(lens)         # baseline-window stats
   composite  = w_aff * z_aff + w_pi * z_pi + w_pr * z_pr   (default equal weights)
   pct        = composite * pct_per_sigma
-  rank       = empirical CDF of composite over the full window
+  rank       = empirical CDF of composite over the same baseline window
 
 The historical baseline window (default 1980-01..present) is used for both
 the mean/std and the empirical CDF — using a single window keeps the percentile
-rank coherent with the z-score.
+rank coherent with the z-score in their *baseline distribution*. Note that
+`overvaluation_pct = z * pct_per_sigma` and `percentile_rank` are NOT a
+deterministic transform of one another — pct is linear in z while rank is the
+empirical CDF, which is non-Gaussian. They are reported as two independent
+indicators.
 
-`pct_per_sigma` is the std_to_pct factor that maps a 1-sigma move to a
-percentage overvaluation. It must be calibrated once against a known
-historical regime so the headline number is interpretable in % terms.
-The source workbook calibrates so that the 2024 reading lands at ~+38%.
+`pct_per_sigma` is calibrated once against a known regime so the headline
+number is interpretable in % terms; the source workbook's calibration places
+the 2024 reading near +38%.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from .affordability import dti
 from .ratios import price_to_income, price_to_rent
 
 DEFAULT_BASELINE_START = pd.Timestamp("1980-01-01")
-DEFAULT_PCT_PER_SIGMA = 19.0  # % overvaluation per 1σ; calibrated in test_validation_gate
+DEFAULT_PCT_PER_SIGMA = 19.0  # % overvaluation per 1σ; calibrated by validation gate
 
 
 @dataclass(frozen=True)
@@ -44,35 +47,46 @@ class Weights:
 def _z(series: pd.Series, baseline_start: pd.Timestamp) -> tuple[pd.Series, float, float]:
     base = series.loc[series.index >= baseline_start].dropna()
     mean = base.mean()
-    std = base.std(ddof=0)
+    std = base.std(ddof=1)
     if std == 0 or np.isnan(std):
         raise ValueError(f"zero/nan std for series {series.name}")
     return (series - mean) / std, float(mean), float(std)
 
 
 def _empirical_cdf(values: np.ndarray, x: float) -> float:
+    """Mid-rank empirical CDF (average of `<x` and `<=x` shares).
+
+    Avoids the off-by-one in the strictly-`<=` form where the minimum baseline
+    value gets a non-zero rank. At the min: rank ≈ 1/(2N); at the max: rank ≈ 1.
+    """
     if len(values) == 0:
         return float("nan")
-    return float((values <= x).sum() / len(values))
+    less = float((values < x).sum())
+    leq = float((values <= x).sum())
+    return (less + leq) / (2.0 * len(values))
 
 
 def compute_lenses(monthly: pd.DataFrame) -> pd.DataFrame:
-    """Compute the three lens series from a monthly_fact frame."""
-    price = monthly["median_price"]
-    rate = monthly["mortgage_rate_30y"]
-    income = monthly["median_income"]
-    oer = monthly["oer_index"]
+    """Compute the three lens series from a monthly_fact frame.
 
-    aff = dti(price, rate, income)
-    pi = price_to_income(price, income)
-    pr = price_to_rent(price, oer)
+    Restricted to rows where every input column is non-null so the three
+    lenses share a common-availability index — required for the composite
+    z-blend to be meaningful.
+    """
+    required = ["median_price", "median_income", "mortgage_rate_30y", "oer_index"]
+    df = monthly[required].dropna()
+    if df.empty:
+        return pd.DataFrame(columns=["affordability", "price_to_income", "price_to_rent"])
 
-    out = pd.DataFrame({
+    aff = dti(df["median_price"], df["mortgage_rate_30y"], df["median_income"])
+    pi = price_to_income(df["median_price"], df["median_income"])
+    pr = price_to_rent(df["median_price"], df["oer_index"])
+
+    return pd.DataFrame({
         "affordability": aff,
         "price_to_income": pi,
         "price_to_rent": pr,
     })
-    return out.dropna()
 
 
 def compute_composite(
@@ -81,8 +95,29 @@ def compute_composite(
     baseline_start: pd.Timestamp = DEFAULT_BASELINE_START,
     pct_per_sigma: float = DEFAULT_PCT_PER_SIGMA,
 ) -> pd.DataFrame:
-    """Build the full composite history frame."""
+    """Build the full composite history frame.
+
+    Returns an empty DataFrame with the correct schema if no lens data is
+    available — callers (API endpoints) can detect this without hitting an
+    exception.
+    """
+    schema_cols = [
+        "z_affordability",
+        "z_price_income",
+        "z_price_rent",
+        "composite_z",
+        "overvaluation_pct",
+        "percentile_rank",
+    ]
     lenses = compute_lenses(monthly)
+    if lenses.empty:
+        return pd.DataFrame(columns=schema_cols, index=pd.DatetimeIndex([], name="obs_date"))
+
+    if not (lenses.index >= baseline_start).any():
+        raise ValueError(
+            f"no lens observations on or after baseline_start={baseline_start.date()}"
+        )
+
     z_aff, _, _ = _z(lenses["affordability"], baseline_start)
     z_pi, _, _ = _z(lenses["price_to_income"], baseline_start)
     z_pr, _, _ = _z(lenses["price_to_rent"], baseline_start)
@@ -103,4 +138,4 @@ def compute_composite(
         "composite_z": composite_z,
         "overvaluation_pct": composite_z * pct_per_sigma,
         "percentile_rank": pct_rank,
-    }).dropna()
+    }).dropna(subset=["composite_z"])

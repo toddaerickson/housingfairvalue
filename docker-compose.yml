@@ -2,31 +2,32 @@ services:
   db:
     image: timescale/timescaledb:latest-pg16
     environment:
-      POSTGRES_USER: hfv
-      POSTGRES_PASSWORD: hfv
-      POSTGRES_DB: hfv
+      POSTGRES_USER: ${POSTGRES_USER:-hfv}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-hfv}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - hfv_pgdata:/var/lib/postgresql/data
       - ./db/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hfv -d hfv"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-hfv} -d $${POSTGRES_DB:-hfv}"]
       interval: 5s
       retries: 10
 
   api:
     build:
-      context: ./backend
-      dockerfile: ../infra/api.Dockerfile
+      context: .
+      dockerfile: infra/api.Dockerfile
     environment:
-      DATABASE_URL: postgresql+psycopg://hfv:hfv@db:5432/hfv
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-hfv}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-hfv}
       FRED_API_KEY: ${FRED_API_KEY:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
     depends_on:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
 volumes:
   hfv_pgdata:

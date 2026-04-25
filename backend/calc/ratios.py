@@ -19,7 +19,7 @@ OER_BASE_MONTHLY_RENT = 1000.0
 
 
 def price_to_income(price: pd.Series, annual_income: pd.Series) -> pd.Series:
-    income_aligned = annual_income.reindex(price.index).ffill()
+    income_aligned = annual_income.reindex(price.index).ffill().bfill()
     return (price / income_aligned).rename("price_to_income")
 
 
@@ -41,6 +41,6 @@ def oer_to_dollar_rent(
 
 
 def price_to_rent(price: pd.Series, oer_index: pd.Series, **kwargs) -> pd.Series:
-    rent_monthly = oer_to_dollar_rent(oer_index, **kwargs).reindex(price.index).ffill()
+    rent_monthly = oer_to_dollar_rent(oer_index, **kwargs).reindex(price.index).ffill().bfill()
     rent_annual = rent_monthly * 12.0
     return (price / rent_annual).rename("price_to_rent")

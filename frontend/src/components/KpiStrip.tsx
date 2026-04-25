@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, Kpi } from "../lib/api";
+import { api, type Kpi } from "../lib/api";
 
 function tile(label: string, value: string, tone: "high" | "low" | "neutral" = "neutral") {
   return (

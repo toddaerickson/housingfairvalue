@@ -3,14 +3,30 @@
 from __future__ import annotations
 
 import pandas as pd
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from backend.calc.composite import compute_composite
+from backend.calc.ratios import oer_to_dollar_rent
 from backend.calc.regimes import REGIMES
 
 from ..db import load_monthly_fact
 
 router = APIRouter(prefix="/history", tags=["history"])
+
+ALLOWED_SERIES = {
+    "median_price", "median_income", "mortgage_rate_30y", "oer_index",
+    "cs_hpi", "zhvi", "treasury_10y", "cpi", "real_dpi_per_capita",
+}
+REGIME_TOLERANCE = pd.Timedelta(days=35)
+
+
+def _parse_date(label: str, value: str | None) -> pd.Timestamp | None:
+    if value is None:
+        return None
+    try:
+        return pd.Timestamp(value)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=f"invalid {label}: {e}") from e
 
 
 def _records(df: pd.DataFrame) -> list[dict]:
@@ -19,54 +35,78 @@ def _records(df: pd.DataFrame) -> list[dict]:
     return out.to_dict(orient="records")
 
 
+def _require_data() -> pd.DataFrame:
+    monthly = load_monthly_fact()
+    if monthly.empty:
+        raise HTTPException(status_code=503, detail="no monthly_fact data — run backfill")
+    return monthly
+
+
 @router.get("/composite")
 def composite(
-    start: str = Query("1980-01-01"),
+    start: str | None = Query("1980-01-01"),
     end: str | None = Query(None),
 ):
-    monthly = load_monthly_fact()
+    monthly = _require_data()
+    s = _parse_date("start", start)
+    e = _parse_date("end", end)
     comp = compute_composite(monthly)
-    sliced = comp.loc[start:end] if end else comp.loc[start:]
+    if comp.empty:
+        raise HTTPException(status_code=503, detail="composite history is empty")
+    sliced = comp.loc[s:e] if (s is not None or e is not None) else comp
     return {"data": _records(sliced)}
 
 
 @router.get("/series")
 def series(
-    name: str = Query(..., description="column name from monthly_fact"),
-    start: str = Query("1980-01-01"),
+    name: str = Query(..., description="series column from monthly_fact"),
+    start: str | None = Query("1980-01-01"),
     end: str | None = Query(None),
 ):
-    monthly = load_monthly_fact()
-    if name not in monthly.columns:
-        return {"error": f"unknown series '{name}'", "available": list(monthly.columns)}
-    s = monthly[[name]].loc[start:end] if end else monthly[[name]].loc[start:]
-    return {"data": _records(s)}
+    if name not in ALLOWED_SERIES:
+        raise HTTPException(status_code=404, detail=f"unknown series '{name}'")
+    monthly = _require_data()
+    s = _parse_date("start", start)
+    e = _parse_date("end", end)
+    df = monthly[[name]].loc[s:e] if (s is not None or e is not None) else monthly[[name]]
+    return {"data": _records(df)}
 
 
 @router.get("/kpi")
 def kpi():
-    monthly = load_monthly_fact()
+    monthly = _require_data()
     comp = compute_composite(monthly)
+    if comp.empty:
+        raise HTTPException(status_code=503, detail="composite history is empty")
+    last_date = comp.index[-1]
     last = comp.iloc[-1]
-    last_m = monthly.loc[comp.index[-1]]
+    last_m = monthly.loc[last_date]
+
+    monthly_rent = float(oer_to_dollar_rent(monthly["oer_index"].dropna()).loc[last_date])
     return {
-        "obs_date": comp.index[-1].strftime("%Y-%m-%d"),
+        "obs_date": last_date.strftime("%Y-%m-%d"),
         "overvaluation_pct": float(last["overvaluation_pct"]),
         "percentile_rank": float(last["percentile_rank"]),
         "price_to_income": float(last_m["median_price"] / last_m["median_income"]),
-        "price_to_rent": float(last_m["median_price"] / (last_m["oer_index"] / 100.0 * 12000.0)),
+        "price_to_rent": float(last_m["median_price"] / (monthly_rent * 12.0)),
         "mortgage_rate_30y": float(last_m["mortgage_rate_30y"]),
     }
 
 
 @router.get("/regimes")
 def regimes():
-    monthly = load_monthly_fact()
+    monthly = _require_data()
     comp = compute_composite(monthly)
+    if comp.empty:
+        raise HTTPException(status_code=503, detail="composite history is empty")
     out = []
     for r in REGIMES:
         ts = pd.Timestamp(r.obs_date)
-        idx = comp.index[comp.index.get_indexer([ts], method="nearest")[0]]
+        idx_pos = comp.index.get_indexer([ts], method="nearest", tolerance=REGIME_TOLERANCE)[0]
+        if idx_pos == -1:
+            out.append({"name": r.name, "obs_date": r.obs_date, "missing": True})
+            continue
+        idx = comp.index[idx_pos]
         row = comp.loc[idx]
         m = monthly.loc[idx]
         out.append({

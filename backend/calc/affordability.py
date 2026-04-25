@@ -18,12 +18,27 @@ DEFAULT_PROP_TAX_PCT = 0.0125
 DEFAULT_INSURANCE_PCT = 0.0035
 
 
-def monthly_payment(principal: float | np.ndarray, annual_rate_pct: float | np.ndarray, n_months: int = 360) -> float | np.ndarray:
-    r = np.asarray(annual_rate_pct) / 100.0 / 12.0
-    p = np.asarray(principal)
-    safe_r = np.where(r == 0, 1e-12, r)
-    pmt = p * safe_r / (1 - (1 + safe_r) ** -n_months)
-    return np.where(r == 0, p / n_months, pmt)
+def monthly_payment(
+    principal: float | np.ndarray,
+    annual_rate_pct: float | np.ndarray,
+    n_months: int = 360,
+) -> np.ndarray:
+    """Standard amortizing monthly payment, vectorized.
+
+    Splits the zero- and non-zero-rate branches on disjoint masks so that
+    extreme small-rate inputs don't pollute the non-zero computation with
+    floating noise.
+    """
+    p = np.asarray(principal, dtype=float)
+    r = np.asarray(annual_rate_pct, dtype=float) / 100.0 / 12.0
+    p_b, r_b = np.broadcast_arrays(p, r)
+    out = np.empty_like(p_b, dtype=float)
+    zero = r_b == 0
+    nz = ~zero
+    out[zero] = p_b[zero] / n_months
+    rn = r_b[nz]
+    out[nz] = p_b[nz] * rn / (1 - (1 + rn) ** -n_months)
+    return out
 
 
 def piti(
@@ -46,10 +61,16 @@ def dti(
     annual_income: pd.Series,
     **piti_kwargs,
 ) -> pd.Series:
-    """Monthly PITI / monthly income, aligned on the price index."""
-    aligned_rate = rate_pct.reindex(price.index).ffill()
-    aligned_income = annual_income.reindex(price.index).ffill()
+    """Monthly PITI / monthly income, aligned on the price index.
+
+    Uses ffill+bfill to backstop both leading and trailing NaNs from
+    lower-frequency inputs (rate is weekly, income is annual). Fully-NaN
+    inputs surface as a clean ValueError rather than silent NaN propagation.
+    """
+    aligned_rate = rate_pct.reindex(price.index).ffill().bfill()
+    aligned_income = annual_income.reindex(price.index).ffill().bfill()
+    if aligned_rate.isna().any() or aligned_income.isna().any():
+        raise ValueError("dti: rate or income series has no overlap with price index")
     monthly_income = aligned_income / 12.0
     p = piti(price.values, aligned_rate.values, **piti_kwargs)
-    out = pd.Series(p / monthly_income.values, index=price.index, name="dti")
-    return out
+    return pd.Series(p / monthly_income.values, index=price.index, name="dti")

@@ -67,32 +67,99 @@ def test_price_to_rent_simple() -> None:
     assert all(abs(pr - 20.0) < 1e-6)
 
 
-def test_compute_composite_sane_on_synthetic_input() -> None:
-    """End-to-end check that the engine produces well-formed output.
-
-    Build a 30-year monthly frame with linear price growth, flat income, flat
-    rate, flat OER. The composite z should range smoothly and the percentile
-    rank should land at 100 at the final (highest-priced) observation.
-    """
-    idx = pd.date_range("1995-01-31", "2024-12-31", freq="ME")
+def _synth_monthly(n_years: int = 30, end: str = "2024-12-31") -> pd.DataFrame:
+    end_ts = pd.Timestamp(end)
+    start = end_ts - pd.DateOffset(years=n_years) + pd.DateOffset(days=1)
+    idx = pd.date_range(start, end_ts, freq="ME")
     n = len(idx)
-    df = pd.DataFrame({
+    return pd.DataFrame({
         "median_price":      np.linspace(100_000, 400_000, n),
         "median_income":     np.full(n, 60_000.0),
         "mortgage_rate_30y": np.full(n, 6.0),
         "oer_index":         np.full(n, 100.0),
-    }, index=idx)
-    df.index.name = "obs_date"
+    }, index=idx).rename_axis("obs_date")
 
-    out = compute_composite(df, baseline_start=pd.Timestamp("1995-01-01"))
+
+def test_compute_composite_sane_on_synthetic_input() -> None:
+    df = _synth_monthly()
+    out = compute_composite(df, baseline_start=df.index.min())
     assert {"composite_z", "overvaluation_pct", "percentile_rank"}.issubset(out.columns)
-    assert out["percentile_rank"].iloc[-1] >= 99.0
-    assert out["percentile_rank"].iloc[0] <= 1.0
-    # Mean of z over baseline ≈ 0
+    # Mid-rank empirical CDF: min ~ 1/(2N), max ~ 100 - 1/(2N).
+    assert out["percentile_rank"].iloc[-1] > 99.0
+    assert out["percentile_rank"].iloc[0] < 1.0
     assert abs(out["composite_z"].mean()) < 1e-6
+
+
+def test_compute_composite_empty_input_returns_empty_frame() -> None:
+    empty = pd.DataFrame(
+        columns=["median_price", "median_income", "mortgage_rate_30y", "oer_index"],
+        index=pd.DatetimeIndex([], name="obs_date"),
+    )
+    out = compute_composite(empty)
+    assert out.empty
+    assert {"composite_z", "overvaluation_pct", "percentile_rank"}.issubset(out.columns)
+
+
+def test_compute_composite_baseline_start_after_data_raises() -> None:
+    import pytest as _pytest
+    df = _synth_monthly(n_years=5, end="2010-12-31")
+    with _pytest.raises(ValueError):
+        compute_composite(df, baseline_start=pd.Timestamp("2030-01-01"))
+
+
+def test_dti_zero_rate_path() -> None:
+    idx = pd.date_range("2020-01-31", periods=2, freq="ME")
+    price = pd.Series([360_000.0, 360_000.0], index=idx)
+    rate = pd.Series([0.0, 0.0], index=idx)
+    income = pd.Series([120_000.0], index=[pd.Timestamp("2020-01-31")])
+    out = dti(price, rate, income, prop_tax_pct=0.0, insurance_pct=0.0, down_pct=0.0)
+    # zero-rate principal-only payment: 360k/360 = $1000; income/12 = $10k → 10%
+    assert abs(out.iloc[0] - 0.10) < 1e-6
+
+
+def test_dti_raises_on_no_overlap_income() -> None:
+    import pytest as _pytest
+    idx = pd.date_range("2020-01-31", periods=4, freq="ME")
+    price = pd.Series([400_000.0] * 4, index=idx)
+    rate = pd.Series([6.0] * 4, index=idx)
+    income = pd.Series(dtype=float)  # empty
+    with _pytest.raises(ValueError):
+        dti(price, rate, income)
+
+
+def test_empirical_cdf_min_max_bounds() -> None:
+    from backend.calc.composite import _empirical_cdf
+    base = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    # Mid-rank: min → 0.5/N = 0.1; max → (N-0.5)/N = 0.9; middle → 0.5
+    assert abs(_empirical_cdf(base, 1.0) - 0.1) < 1e-9
+    assert abs(_empirical_cdf(base, 5.0) - 0.9) < 1e-9
+    assert abs(_empirical_cdf(base, 3.0) - 0.5) < 1e-9
+
+
+def test_monthly_payment_array_with_mixed_zero_and_nonzero() -> None:
+    pmts = monthly_payment(np.array([360_000.0, 400_000.0]), np.array([0.0, 6.0]))
+    assert abs(pmts[0] - 1000.0) < 1e-6
+    assert abs(pmts[1] - 2398.20) < 1.0
 
 
 def test_weights_must_sum_to_one() -> None:
     import pytest as _pytest
     with _pytest.raises(ValueError):
         Weights(0.5, 0.3, 0.3)
+
+
+def test_stitch_income_anchors_on_first_non_nan() -> None:
+    from backend.ingest.fred import stitch_income
+    idx = pd.date_range("1980-01-31", "1990-12-31", freq="ME")
+    median_income = pd.Series(np.nan, index=idx, name="MEHOINUSA646N")
+    median_income.loc["1984-01-31":] = np.linspace(20000.0, 25000.0, len(median_income.loc["1984-01-31":]))
+    real_dpi = pd.Series(np.linspace(10000.0, 15000.0, len(idx)), index=idx, name="A229RX0")
+
+    spliced = stitch_income(median_income, real_dpi)
+    splice = pd.Timestamp("1984-01-31")
+
+    assert abs(spliced.loc[splice] - median_income.loc[splice]) < 1e-9
+    assert not spliced.loc[:splice - pd.Timedelta(days=1)].isna().any()
+    expected_pre = real_dpi.loc[idx < splice] * (median_income.loc[splice] / real_dpi.loc[splice])
+    diff = (spliced.reindex(expected_pre.index) - expected_pre).abs().max()
+    assert diff < 1e-6
