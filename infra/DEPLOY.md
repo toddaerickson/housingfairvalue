@@ -5,7 +5,7 @@ Step-by-step guide to deploy the Housing Fair Value dashboard from scratch.
 ## Architecture
 
 ```
-[FRED API] → [Daily Cron (GH Actions)] → [Supabase Postgres] → [Render FastAPI] → [Vercel React SPA]
+[FRED API] → [Daily Cron (GH Actions)] → [Supabase Postgres] → [Fly.io FastAPI] → [Vercel React SPA]
 ```
 
 ## Prerequisites
@@ -13,7 +13,7 @@ Step-by-step guide to deploy the Housing Fair Value dashboard from scratch.
 - FRED API key: https://fred.stlouisfed.org/docs/api/api_key.html
 - GitHub account with repo access
 - Supabase account (free tier)
-- Render account (free or Starter tier)
+- Fly.io account (free tier)
 - Vercel account (Hobby tier)
 
 ## 1. Provision Supabase Database
@@ -40,18 +40,28 @@ python -m backend.ingest.pipeline --backfill
 
 Verify: the pipeline should report 500+ monthly_fact rows and composite_history rows.
 
-## 3. Deploy API to Render
+## 3. Deploy API to Fly.io
 
-1. Connect the GitHub repo to Render
-2. Create a **Web Service** from the repo
-3. Settings:
-   - **Docker:** use `infra/api.Dockerfile`
-   - **Health check path:** `/ready`
-4. Environment variables:
-   - `DATABASE_URL` = Supabase pooler connection string (port 6543)
-   - `FRED_API_KEY` = your FRED key
-   - `ALLOWED_ORIGINS` = `https://housingfairvalue.vercel.app` (or your custom domain)
-5. Enable auto-deploy from `main` branch
+1. Install the Fly CLI: `curl -L https://fly.io/install.sh | sh`
+2. Sign up / log in: `fly auth signup` or `fly auth login`
+3. Launch the app (from repo root):
+   ```bash
+   fly launch --no-deploy
+   ```
+   - Accept the app name (`housingfairvalue-api`) or choose your own
+   - Select region (default: `iad` / Virginia)
+   - Say **no** to provisioning a Postgres database
+4. Set secrets:
+   ```bash
+   fly secrets set DATABASE_URL="postgresql+psycopg://postgres.[ref]:[password]@db.[ref].supabase.co:6543/postgres"
+   fly secrets set FRED_API_KEY="your-fred-key"
+   ```
+   Note: `ALLOWED_ORIGINS` is already set in `fly.toml`
+5. Deploy:
+   ```bash
+   fly deploy
+   ```
+6. Verify: `fly open /ready` — should return `{"status": "ready"}`
 
 ## 4. Deploy Frontend to Vercel
 
@@ -61,7 +71,7 @@ Verify: the pipeline should report 500+ monthly_fact rows and composite_history 
    - **Build command:** `npm run build`
    - **Output directory:** `dist`
 3. Environment variables:
-   - `VITE_API_BASE` = `https://<your-render-service>.onrender.com` (no trailing slash)
+   - `VITE_API_BASE` = `https://<your-fly-app>.fly.dev` (no trailing slash)
 4. Vercel auto-deploys from `main`
 
 ## 5. Configure Daily Cron
@@ -77,8 +87,8 @@ Verify: the pipeline should report 500+ monthly_fact rows and composite_history 
 ## 6. Set Up Monitoring
 
 ### UptimeRobot (free)
-- Monitor 1: `GET https://<render-url>/health` (liveness, 5-min interval)
-- Monitor 2: `GET https://<render-url>/health/data` (freshness, alert on 503)
+- Monitor 1: `GET https://<fly-app>.fly.dev/health` (liveness, 5-min interval)
+- Monitor 2: `GET https://<fly-app>.fly.dev/health/data` (freshness, alert on 503)
 - Monitor 3: `GET https://<vercel-url>/` (frontend, 5-min interval)
 - Alert contact: terickson@marathoncre.com
 
@@ -92,7 +102,7 @@ Verify: the pipeline should report 500+ monthly_fact rows and composite_history 
 1. Register/own a domain
 2. In Vercel, go to project Settings > Domains > Add
 3. Add a CNAME record in your DNS pointing to `cname.vercel-dns.com`
-4. Update `ALLOWED_ORIGINS` in Render to include the custom domain
+4. Update `ALLOWED_ORIGINS` in `fly.toml` and redeploy: `fly deploy`
 
 ## Recovery
 
@@ -110,9 +120,9 @@ All data comes from FRED — there is no user-generated data to lose.
 
 | Variable | Where | Value |
 |----------|-------|-------|
-| `DATABASE_URL` | Render | Supabase pooler (port 6543) |
+| `DATABASE_URL` | Fly.io (secret) | Supabase pooler (port 6543) |
 | `DATABASE_URL` | GitHub Actions | Supabase direct (port 5432) |
-| `FRED_API_KEY` | Render, GitHub Actions | FRED API key |
-| `ALLOWED_ORIGINS` | Render | Vercel URL(s), comma-separated |
-| `VITE_API_BASE` | Vercel | Render service URL |
+| `FRED_API_KEY` | Fly.io (secret), GitHub Actions | FRED API key |
+| `ALLOWED_ORIGINS` | Fly.io (`fly.toml`) | Vercel URL(s), comma-separated |
+| `VITE_API_BASE` | Vercel | Fly.io app URL |
 | `HEALTHCHECK_PING_URL` | GitHub Actions | Healthchecks.io ping URL (optional) |
