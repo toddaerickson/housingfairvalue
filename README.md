@@ -18,11 +18,7 @@ pyproject.toml  Python project (importable as `backend.*`)
 docker-compose.yml
 ```
 
-## Where the code lives
-
-GitHub: <https://github.com/toddaerickson/housingfairvalue>
-Active branch: `claude/housing-affordability-calculator-J9aG3` (also pushed
-to `main`).
+## Getting the code
 
 ```sh
 git clone https://github.com/toddaerickson/housingfairvalue.git
