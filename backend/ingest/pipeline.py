@@ -21,6 +21,13 @@ log = structlog.get_logger()
 
 LOOKBACK_DAYS = 35  # Covers FRED revision window + quarterly lag
 
+REQUIRED_ENV = ("FRED_API_KEY", "DATABASE_URL")
+
+
+def _preflight() -> list[str]:
+    """Return names of required env vars that are unset or empty."""
+    return [k for k in REQUIRED_ENV if not os.environ.get(k)]
+
 
 def _ping_healthcheck(success: bool) -> None:
     """Ping Healthchecks.io if configured."""
@@ -79,6 +86,12 @@ def main() -> None:
             structlog.processors.JSONRenderer(),
         ],
     )
+
+    missing = _preflight()
+    if missing:
+        log.error("pipeline.preflight_failed", missing=missing)
+        _ping_healthcheck(success=False)
+        sys.exit(2)
 
     if args.backfill:
         since = START_DATE
