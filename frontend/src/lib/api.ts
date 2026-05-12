@@ -36,6 +36,19 @@ export type HeatmapCell = {
   pct_deviation_from_current: number;
 };
 
+export type TornadoBar = {
+  input: string;
+  delta: number;
+  z_up: number;
+  z_dn: number;
+  abs_effect: number;
+};
+
+export type TornadoResponse = {
+  base_z: number;
+  bars: TornadoBar[];
+};
+
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(`${BASE}${path}`);
   if (!r.ok) throw new Error(`${path}: ${r.status}`);
@@ -47,4 +60,5 @@ export const api = {
   kpi: () => get<Kpi>("/history/kpi"),
   regimes: () => get<{ regimes: RegimeRow[] }>("/history/regimes"),
   heatmap: () => get<{ current: { rate_pct: number; median_price: number }; cells: HeatmapCell[] }>("/sensitivity/heatmap"),
+  tornado: () => get<TornadoResponse>("/sensitivity/tornado"),
 };
