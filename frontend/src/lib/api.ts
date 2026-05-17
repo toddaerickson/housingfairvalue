@@ -49,16 +49,36 @@ export type TornadoResponse = {
   bars: TornadoBar[];
 };
 
+export type HeatmapParams = {
+  rate_min?: number;
+  rate_max?: number;
+  rate_step?: number;
+  dti_min?: number;
+  dti_max?: number;
+  dti_step?: number;
+};
+
+export type HeatmapResponse = {
+  current: { rate_pct: number; median_price: number };
+  cells: HeatmapCell[];
+};
+
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(`${BASE}${path}`);
   if (!r.ok) throw new Error(`${path}: ${r.status}`);
   return r.json();
 }
 
+function qs(params: Record<string, number | string | undefined>): string {
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null);
+  if (!entries.length) return "";
+  return "?" + new URLSearchParams(entries.map(([k, v]) => [k, String(v)])).toString();
+}
+
 export const api = {
   composite: () => get<{ data: CompositePoint[] }>("/history/composite"),
   kpi: () => get<Kpi>("/history/kpi"),
   regimes: () => get<{ regimes: RegimeRow[] }>("/history/regimes"),
-  heatmap: () => get<{ current: { rate_pct: number; median_price: number }; cells: HeatmapCell[] }>("/sensitivity/heatmap"),
+  heatmap: (params: HeatmapParams = {}) => get<HeatmapResponse>(`/sensitivity/heatmap${qs(params)}`),
   tornado: () => get<TornadoResponse>("/sensitivity/tornado"),
 };
