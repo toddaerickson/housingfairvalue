@@ -19,15 +19,22 @@ export type Kpi = {
   mortgage_rate_30y: number;
 };
 
-export type RegimeRow = {
-  name: string;
-  obs_date: string;
-  overvaluation_pct: number;
-  percentile_rank: number;
-  median_price: number;
-  mortgage_rate_30y: number;
-  median_income: number;
-};
+export type RegimeRow =
+  | {
+      name: string;
+      obs_date: string;
+      missing: true;
+    }
+  | {
+      name: string;
+      obs_date: string;
+      missing?: false;
+      overvaluation_pct: number;
+      percentile_rank: number;
+      median_price: number;
+      mortgage_rate_30y: number;
+      median_income: number;
+    };
 
 export type HeatmapCell = {
   rate_pct: number;
