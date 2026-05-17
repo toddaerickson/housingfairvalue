@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from sqlalchemy import text
 
 from .db import engine
+from .limiter import limiter
 from .routers import history, sensitivity
 
-limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+log = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Housing Fair Value API",
@@ -24,6 +26,8 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# Required for @limiter.limit decorators and default_limits to actually fire.
+app.add_middleware(SlowAPIMiddleware)
 
 _origins = [
     o.strip()
@@ -41,7 +45,6 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 app.include_router(history.router)
 app.include_router(sensitivity.router)
 
-# Cache-Control values for different endpoint groups
 _CACHE_HISTORY = "public, max-age=3600, stale-while-revalidate=86400"
 _CACHE_SENSITIVITY = "public, max-age=3600"
 
@@ -49,6 +52,10 @@ _CACHE_SENSITIVITY = "public, max-age=3600"
 @app.middleware("http")
 async def add_cache_headers(request: Request, call_next):
     response: Response = await call_next(request)
+    # Don't cache mutating methods. /sensitivity/montecarlo is POST and would
+    # otherwise pick up the public Cache-Control below.
+    if request.method != "GET":
+        return response
     path = request.url.path
     if path.startswith("/history/"):
         response.headers["Cache-Control"] = _CACHE_HISTORY
@@ -69,8 +76,10 @@ def ready():
     try:
         with engine().connect() as conn:
             conn.execute(text("SELECT 1"))
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"db unavailable: {e}") from e
+    except Exception:
+        # Don't leak DSN / driver internals to anonymous callers.
+        log.exception("readiness check failed")
+        raise HTTPException(status_code=503, detail="database unavailable")
     return {"status": "ready"}
 
 
@@ -79,14 +88,11 @@ def health_data():
     """Data freshness check — queries ingest_run and monthly_fact for staleness."""
     try:
         with engine().connect() as conn:
-            # Check latest ingest run
             row = conn.execute(text(
                 "SELECT finished_at, status, rows_obs, rows_fact "
                 "FROM ingest_run WHERE status = 'ok' "
                 "ORDER BY finished_at DESC LIMIT 1"
             )).fetchone()
-
-            # Check latest data point
             latest = conn.execute(text(
                 "SELECT MAX(obs_date) AS max_date FROM monthly_fact"
             )).fetchone()
@@ -118,5 +124,4 @@ def health_data():
         return result
 
     except Exception:
-        # ingest_run table may not exist yet (pre-migration)
         return {"status": "unknown", "detail": "ingest_run table not available"}
