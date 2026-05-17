@@ -48,7 +48,7 @@ function Slider({
         onChange={(e) => onChange(Number(e.target.value))}
       />
       <span className="val" aria-live="polite">
-        {value.toFixed(suffix === "%" ? (step < 1 ? 2 : 0) : 2)}{suffix}
+        {value.toFixed(step < 1 ? 2 : 0)}{suffix}
       </span>
     </div>
   );
@@ -100,7 +100,7 @@ export default function SensitivityInputs({ state, onChange, onReset }: Props) {
           label="Min"
           min={DTI_FLOOR}
           max={Math.max(state.dti_max - 2, DTI_FLOOR)}
-          step={1}
+          step={2}
           value={state.dti_min}
           suffix="%"
           onChange={(v) => onChange({ dti_min: v })}
@@ -110,7 +110,7 @@ export default function SensitivityInputs({ state, onChange, onReset }: Props) {
           label="Max"
           min={Math.min(state.dti_min + 2, DTI_CEILING)}
           max={DTI_CEILING}
-          step={1}
+          step={2}
           value={state.dti_max}
           suffix="%"
           onChange={(v) => onChange({ dti_max: v })}
@@ -122,7 +122,6 @@ export default function SensitivityInputs({ state, onChange, onReset }: Props) {
         className="reset-btn"
         onClick={onReset}
         disabled={isDefault}
-        aria-label="Reset all inputs to defaults"
       >
         Reset to defaults
       </button>

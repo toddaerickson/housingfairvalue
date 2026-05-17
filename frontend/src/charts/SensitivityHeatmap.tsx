@@ -18,6 +18,7 @@ export default function SensitivityHeatmap({ params }: Props = {}) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["heatmap", params],
     queryFn: () => api.heatmap(params),
+    placeholderData: (prev) => prev,
   });
 
   if (isLoading) return <div className="muted">Computing heatmap…</div>;
