@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, type HeatmapCell } from "../lib/api";
+import { api, type HeatmapCell, type HeatmapParams } from "../lib/api";
 
 function colorFor(pct: number): string {
   const clamped = Math.max(-50, Math.min(50, pct));
@@ -12,10 +12,12 @@ function colorFor(pct: number): string {
 
 const LEGEND_STOPS = [-50, -25, 0, 25, 50];
 
-export default function SensitivityHeatmap() {
+type Props = { params?: HeatmapParams };
+
+export default function SensitivityHeatmap({ params }: Props = {}) {
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["heatmap"],
-    queryFn: api.heatmap,
+    queryKey: ["heatmap", params],
+    queryFn: () => api.heatmap(params),
   });
 
   if (isLoading) return <div className="muted">Computing heatmap…</div>;
