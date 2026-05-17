@@ -56,6 +56,13 @@ export type TornadoResponse = {
   bars: TornadoBar[];
 };
 
+export type BreakpointsResponse = {
+  current_z: number;
+  rate_to_neutralize_pct: number | null;
+  income_to_neutralize_usd: number | null;
+  price_decline_to_neutralize_pct: number | null;
+};
+
 export type HeatmapParams = {
   rate_min?: number;
   rate_max?: number;
@@ -88,4 +95,5 @@ export const api = {
   regimes: () => get<{ regimes: RegimeRow[] }>("/history/regimes"),
   heatmap: (params: HeatmapParams = {}) => get<HeatmapResponse>(`/sensitivity/heatmap${qs(params)}`),
   tornado: () => get<TornadoResponse>("/sensitivity/tornado"),
+  breakpoints: () => get<BreakpointsResponse>("/sensitivity/breakpoints"),
 };
