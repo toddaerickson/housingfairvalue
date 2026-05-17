@@ -123,6 +123,30 @@ nav a.active { color: #111; font-weight: 600; border-bottom: 2px solid #111; }
 .regime-stats dd { margin: 0; font-variant-numeric: tabular-nums; color: #222; }
 .regime-missing { opacity: 0.7; }
 
+.lens-decomp-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+.lens-panel {
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem 0.35rem;
+  background: #fff;
+}
+.lens-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.15rem;
+}
+.lens-header h3 { margin: 0; font-size: 0.85rem; font-weight: 600; }
+.lens-current { font-size: 0.78rem; color: #666; font-variant-numeric: tabular-nums; }
+.lens-current strong { color: #111; font-weight: 600; }
+.lens-explainer { font-size: 0.72rem; color: #777; margin: 0 0 0.25rem; }
+
 .layout-2col { display: grid; grid-template-columns: 280px 1fr; gap: 1.5rem; align-items: start; }
 .muted { color: #666; font-size: 0.85rem; }
 
