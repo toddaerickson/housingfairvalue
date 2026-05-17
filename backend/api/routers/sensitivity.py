@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query, Request
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from backend.calc.affordability import piti
 from backend.calc.composite import compute_composite
 
 from ..db import load_monthly_fact
+from ..limiter import limiter
 
-limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/sensitivity", tags=["sensitivity"])
 
 
