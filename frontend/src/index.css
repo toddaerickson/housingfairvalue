@@ -147,6 +147,46 @@ nav a.active { color: #111; font-weight: 600; border-bottom: 2px solid #111; }
 .lens-current strong { color: #111; font-weight: 600; }
 .lens-explainer { font-size: 0.72rem; color: #777; margin: 0 0 0.25rem; }
 
+.breakpoint-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+.breakpoint-card {
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 0.75rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.breakpoint-label {
+  font-size: 0.72rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 600;
+}
+.breakpoint-value {
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: #111;
+  font-variant-numeric: tabular-nums;
+}
+.breakpoint-value.missing {
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: #888;
+  font-style: italic;
+}
+.breakpoint-tagline {
+  font-size: 0.72rem;
+  color: #777;
+  line-height: 1.35;
+}
+
 .layout-2col { display: grid; grid-template-columns: 280px 1fr; gap: 1.5rem; align-items: start; }
 .muted { color: #666; font-size: 0.85rem; }
 
@@ -167,6 +207,9 @@ nav a.active { color: #111; font-weight: 600; border-bottom: 2px solid #111; }
   .layout-2col { grid-template-columns: 1fr; }
   .sticky-aside { position: static; }
   .regime-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 900px) {
+  .breakpoint-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
   .kpi-strip { grid-template-columns: repeat(2, 1fr); }
