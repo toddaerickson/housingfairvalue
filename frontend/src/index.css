@@ -187,6 +187,29 @@ nav a.active { color: #111; font-weight: 600; border-bottom: 2px solid #111; }
   line-height: 1.35;
 }
 
+.ytfv-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.ytfv-table { border-collapse: collapse; font-size: 0.85rem; margin-top: 0.5rem; }
+.ytfv-table th { padding: 5px 10px; font-weight: 600; color: #444; text-align: center; }
+.ytfv-table thead th { font-size: 0.78rem; color: #555; }
+.ytfv-table tbody th { text-align: right; font-variant-numeric: tabular-nums; background: #fafafa; }
+.ytfv-table td {
+  padding: 10px 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 60px;
+}
+.ytfv-row-axis {
+  display: inline-block;
+  font-size: 0.7rem;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-right: 0.6rem;
+  vertical-align: middle;
+}
+.ytfv-base { margin: 0.5rem 0 0; }
+
 .layout-2col { display: grid; grid-template-columns: 280px 1fr; gap: 1.5rem; align-items: start; }
 .muted { color: #666; font-size: 0.85rem; }
 

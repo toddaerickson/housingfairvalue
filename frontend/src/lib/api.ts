@@ -63,6 +63,17 @@ export type BreakpointsResponse = {
   price_decline_to_neutralize_pct: number | null;
 };
 
+export type YearsToFvCell = {
+  price_growth_pct: number;
+  income_growth_pct: number;
+  years: number | null;
+};
+
+export type YearsToFvResponse = {
+  base_overvaluation_pct: number;
+  grid: YearsToFvCell[];
+};
+
 export type HeatmapParams = {
   rate_min?: number;
   rate_max?: number;
@@ -96,4 +107,5 @@ export const api = {
   heatmap: (params: HeatmapParams = {}) => get<HeatmapResponse>(`/sensitivity/heatmap${qs(params)}`),
   tornado: () => get<TornadoResponse>("/sensitivity/tornado"),
   breakpoints: () => get<BreakpointsResponse>("/sensitivity/breakpoints"),
+  yearsToFv: () => get<YearsToFvResponse>("/sensitivity/years-to-fv"),
 };
