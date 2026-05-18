@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import SensitivityHeatmap from "../charts/SensitivityHeatmap";
 import SensitivityTornado from "../charts/SensitivityTornado";
 import BreakpointCards from "../components/BreakpointCards";
+import YearsToFvGrid from "../components/YearsToFvGrid";
 import SensitivityInputs, {
   DEFAULTS,
   type SensitivityState,
@@ -73,10 +74,11 @@ export default function Sensitivity() {
       <section>
         <BreakpointCards />
         <SensitivityHeatmap params={state} />
+        <YearsToFvGrid />
         <SensitivityTornado />
         <div className="chart-card">
-          <h2>Years-to-fair-value · Monte Carlo</h2>
-          <p className="muted">Wired in subsequent phases. API endpoints already exist.</p>
+          <h2>Monte Carlo</h2>
+          <p className="muted">Wired in a subsequent phase. API endpoint already exists.</p>
         </div>
       </section>
     </div>
