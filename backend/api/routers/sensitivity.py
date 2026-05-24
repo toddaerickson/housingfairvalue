@@ -15,13 +15,21 @@ router = APIRouter(prefix="/sensitivity", tags=["sensitivity"])
 
 
 def _latest():
+    """Return (monthly_fact, composite_history, last_complete_date).
+
+    `last_complete_date` is the most recent obs_date where *all* fields
+    required by `compute_lenses` are non-null (i.e. the row that actually
+    drives `composite_z.iloc[-1]`). Sensitivity endpoints must perturb
+    *this* row — perturbing `monthly.iloc[-1]` is a no-op whenever the
+    tail of monthly_fact has stale fields like `median_income`.
+    """
     monthly = load_monthly_fact()
     if monthly.empty:
         raise HTTPException(status_code=503, detail="no monthly_fact data — run backfill")
     comp = compute_composite(monthly)
     if comp.empty:
         raise HTTPException(status_code=503, detail="composite history is empty")
-    return monthly, comp
+    return monthly, comp, comp.index[-1]
 
 
 @router.get("/heatmap")
@@ -36,8 +44,8 @@ def heatmap(
     if rate_max <= rate_min or dti_max <= dti_min:
         raise HTTPException(status_code=400, detail="max must exceed min")
 
-    monthly, _ = _latest()
-    last = monthly.iloc[-1]
+    monthly, _, last_date = _latest()
+    last = monthly.loc[last_date]
     income_monthly = float(last["median_income"]) / 12.0
     rates = np.arange(rate_min, rate_max + rate_step / 2, rate_step)
     dtis = np.arange(dti_min, dti_max + dti_step / 2, dti_step)
@@ -71,8 +79,8 @@ def tornado():
     Holds the *baseline* mean/std fixed and only perturbs the last observation,
     so the reported sensitivity is a clean ∂z/∂input of the most recent reading.
     """
-    monthly, comp = _latest()
-    last = monthly.iloc[-1]
+    monthly, comp, last_date = _latest()
+    last = monthly.loc[last_date]
     base_z = float(comp["composite_z"].iloc[-1])
 
     inputs = {
@@ -85,9 +93,9 @@ def tornado():
     bars = []
     for name, (base, delta) in inputs.items():
         up = monthly.copy(deep=True)
-        up.loc[up.index[-1], name] = base + delta
+        up.loc[last_date, name] = base + delta
         dn = monthly.copy(deep=True)
-        dn.loc[dn.index[-1], name] = base - delta
+        dn.loc[last_date, name] = base - delta
         z_up = float(compute_composite(up)["composite_z"].iloc[-1])
         z_dn = float(compute_composite(dn)["composite_z"].iloc[-1])
         bars.append({
@@ -123,13 +131,13 @@ def _bisect_to_zero(f, lo: float, hi: float, tol: float = 1e-3, max_iter: int = 
 @limiter.limit("10/minute")
 def breakpoints(request: Request):
     """Three live numbers: rate / income / price-decline that neutralize composite."""
-    monthly, comp = _latest()
-    last = monthly.iloc[-1]
+    monthly, comp, last_date = _latest()
+    last = monthly.loc[last_date]
     base_z = float(comp["composite_z"].iloc[-1])
 
     def z_with(field: str, value: float) -> float:
         m = monthly.copy(deep=True)
-        m.loc[m.index[-1], field] = value
+        m.loc[last_date, field] = value
         return float(compute_composite(m)["composite_z"].iloc[-1])
 
     rate_neutral = _bisect_to_zero(lambda x: z_with("mortgage_rate_30y", x), 0.5, 15.0)
@@ -170,7 +178,7 @@ def years_to_fv(
     the overvaluation %. Intentionally approximate; the Monte Carlo tab gives
     distributional bands.
     """
-    _, comp = _latest()
+    _, comp, _ = _latest()
     base_pct = float(comp["overvaluation_pct"].iloc[-1])
 
     def years(price_g: float, income_g: float) -> int | None:
@@ -210,7 +218,7 @@ def montecarlo(
     Right-censored paths report `None` years; the median/percentiles are
     computed only over paths that actually reach FV.
     """
-    _, comp = _latest()
+    _, comp, _ = _latest()
     base_pct = float(comp["overvaluation_pct"].iloc[-1])
     rng = np.random.default_rng(seed)
 
