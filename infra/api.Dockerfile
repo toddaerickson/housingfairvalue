@@ -9,6 +9,12 @@ RUN pip install --no-cache-dir .
 
 RUN chown -R app:app /app
 
+# Passed by `fly deploy --build-arg GIT_SHA=$(git rev-parse --short HEAD)` so
+# /health can report which commit is actually running. Defaults to `unknown`
+# when omitted.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
+
 USER app
 EXPOSE 8000
 # --proxy-headers + --forwarded-allow-ips='*' so the rate limiter keys on the

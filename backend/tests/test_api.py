@@ -63,7 +63,9 @@ def sample_data(monkeypatch) -> None:
 def test_health_does_not_touch_db(client: TestClient) -> None:
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    body = r.json()
+    assert body["status"] == "ok"
+    assert "git_sha" in body  # populated from GIT_SHA build arg; "unknown" in tests
 
 
 def test_history_composite_empty_returns_503(client: TestClient, empty_data) -> None:
