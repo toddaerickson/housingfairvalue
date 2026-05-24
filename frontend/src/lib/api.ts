@@ -74,6 +74,19 @@ export type YearsToFvResponse = {
   grid: YearsToFvCell[];
 };
 
+export type MonteCarloResponse = {
+  base_overvaluation_pct: number;
+  n_paths: number;
+  horizon_years: number;
+  share_reaching_fv: number;
+  median_years: number | null;
+  p10_years: number | null;
+  p90_years: number | null;
+  histogram_years: number[];
+  histogram_counts: number[];
+  censored_count: number;
+};
+
 export type HeatmapParams = {
   rate_min?: number;
   rate_max?: number;
@@ -94,6 +107,12 @@ async function get<T>(path: string): Promise<T> {
   return r.json();
 }
 
+async function post<T>(path: string): Promise<T> {
+  const r = await fetch(`${BASE}${path}`, { method: "POST" });
+  if (!r.ok) throw new Error(`${path}: ${r.status}`);
+  return r.json();
+}
+
 function qs(params: Record<string, number | string | undefined>): string {
   const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null);
   if (!entries.length) return "";
@@ -108,4 +127,5 @@ export const api = {
   tornado: () => get<TornadoResponse>("/sensitivity/tornado"),
   breakpoints: () => get<BreakpointsResponse>("/sensitivity/breakpoints"),
   yearsToFv: () => get<YearsToFvResponse>("/sensitivity/years-to-fv"),
+  monteCarlo: () => post<MonteCarloResponse>("/sensitivity/montecarlo"),
 };
