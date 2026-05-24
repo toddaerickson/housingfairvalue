@@ -66,7 +66,8 @@ class Config:
         url = os.environ.get("DATABASE_URL")
         if not url:
             raise SystemExit("DATABASE_URL not set")
-        return cls(fred_api_key=key, database_url=url)
+        from ..db_url import normalize_db_url
+        return cls(fred_api_key=key, database_url=normalize_db_url(url))
 
 
 def validate_series(series_id: str, s: pd.Series) -> pd.Series:

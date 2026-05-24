@@ -9,6 +9,8 @@ import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 
+from ..db_url import normalize_db_url
+
 
 @lru_cache(maxsize=1)
 def engine() -> Engine:
@@ -16,7 +18,7 @@ def engine() -> Engine:
     if not url:
         raise RuntimeError("DATABASE_URL is not set")
     return create_engine(
-        url,
+        normalize_db_url(url),
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=5,
