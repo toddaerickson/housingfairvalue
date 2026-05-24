@@ -44,5 +44,5 @@ python -m backend.ingest.fred --since 2025-01-01  # Incremental FRED ingest
 
 ## Pitfalls
 - Gate failures post-backfill → suspect `pct_per_sigma` calibration (the only tunable knob)
-- Sensitivity UI incomplete (sliders, tornado, MC pending; API endpoints exist)
-- `package-lock.json` not committed yet; turn on `npm ci` after adding it
+- Sensitivity perturbation endpoints (`/sensitivity/breakpoints`, `/tornado`, `/heatmap`) must act on the latest *complete* row (`comp.index[-1]`), not `monthly.iloc[-1]` — the tail of `monthly_fact` carries fresh rates with stale (NaN) `median_income`/`median_price`, which `compute_lenses` drops
+- `fly deploy` must be invoked with `--build-arg GIT_SHA="$(git rev-parse --short HEAD)"` so `/health` reports the running commit; otherwise it returns `"git_sha":"unknown"`
