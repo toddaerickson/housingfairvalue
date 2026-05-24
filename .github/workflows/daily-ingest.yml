@@ -4,7 +4,12 @@ on:
   schedule:
     # 2 PM UTC = after FRED morning releases (US Eastern)
     - cron: '0 14 * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: 'Pull full history from 1980 instead of the 35-day lookback'
+        type: boolean
+        default: false
 
 jobs:
   ingest:
@@ -22,4 +27,4 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           HEALTHCHECK_PING_URL: ${{ secrets.HEALTHCHECK_PING_URL }}
-        run: python -m backend.ingest.pipeline
+        run: python -m backend.ingest.pipeline ${{ (inputs.backfill && '--backfill') || '' }}
