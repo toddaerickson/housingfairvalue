@@ -128,8 +128,14 @@ values. Re-running `secrets set` just overwrites.
 ## 6. Deploy
 
 ```sh
-flyctl deploy --app housingfairvalue-api
+flyctl deploy --app housingfairvalue-api \
+  --build-arg GIT_SHA="$(git rev-parse --short HEAD)"
 ```
+
+The `GIT_SHA` build arg is baked into the image so `/health` reports
+which commit is actually running. Omit the flag and `/health` reports
+`"git_sha":"unknown"` — useful sometimes (local docker build), bad on
+prod because `/verify-deploy` can't confirm the match.
 
 First deploy builds the Docker image (3-5 minutes) and pushes it.
 Subsequent deploys cache layers.
@@ -190,14 +196,14 @@ in `fly.toml`.
 
 ## 9. Day-to-day commands
 
-| Task                         | Command                                                       |
-| ---------------------------- | ------------------------------------------------------------- |
-| Tail logs                    | `flyctl logs --app housingfairvalue-api`                      |
-| Open an SSH shell to the VM  | `flyctl ssh console --app housingfairvalue-api`               |
-| Restart the app              | `flyctl machines restart --app housingfairvalue-api`          |
-| Rotate a secret              | `flyctl secrets set KEY=value --app housingfairvalue-api`     |
-| Redeploy after a code change | `flyctl deploy --app housingfairvalue-api`                    |
-| See machine state            | `flyctl status --app housingfairvalue-api`                    |
+| Task                         | Command                                                                                        |
+| ---------------------------- | ---------------------------------------------------------------------------------------------- |
+| Tail logs                    | `flyctl logs --app housingfairvalue-api`                                                       |
+| Open an SSH shell to the VM  | `flyctl ssh console --app housingfairvalue-api`                                                |
+| Restart the app              | `flyctl machines restart --app housingfairvalue-api`                                           |
+| Rotate a secret              | `flyctl secrets set KEY=value --app housingfairvalue-api`                                      |
+| Redeploy after a code change | `flyctl deploy --app housingfairvalue-api --build-arg GIT_SHA="$(git rev-parse --short HEAD)"` |
+| See machine state            | `flyctl status --app housingfairvalue-api`                                                     |
 
 ## 10. If something goes wrong
 

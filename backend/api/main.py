@@ -19,6 +19,10 @@ from .routers import history, sensitivity
 
 log = logging.getLogger(__name__)
 
+# Baked into the image by the Dockerfile via --build-arg GIT_SHA=$(git rev-parse --short HEAD).
+# `unknown` when running outside a build (local dev, tests).
+GIT_SHA = os.environ.get("GIT_SHA", "unknown")
+
 app = FastAPI(
     title="Housing Fair Value API",
     description="National US housing overvaluation composite signal — history + sensitivity.",
@@ -67,7 +71,7 @@ async def add_cache_headers(request: Request, call_next):
 @app.get("/health")
 def health():
     """Liveness only — does not touch the DB."""
-    return {"status": "ok"}
+    return {"status": "ok", "git_sha": GIT_SHA}
 
 
 @app.get("/ready")
