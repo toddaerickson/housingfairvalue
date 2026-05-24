@@ -32,7 +32,8 @@ def monthly_fact() -> pd.DataFrame:
 
     db_url = os.environ.get("DATABASE_URL")
     if db_url:
-        engine = create_engine(db_url)
+        from backend.db_url import normalize_db_url
+        engine = create_engine(normalize_db_url(db_url))
         df = pd.read_sql("SELECT * FROM monthly_fact ORDER BY obs_date", engine, parse_dates=["obs_date"])
         return df.set_index("obs_date")
 
