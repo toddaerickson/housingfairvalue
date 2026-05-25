@@ -32,7 +32,7 @@ python -m backend.ingest.fred --since 2025-01-01  # Incremental FRED ingest
 - `backend/api/routers/{history,sensitivity}.py` — Two endpoints; empty-data returns 503 with detail
 
 ## Key Conventions
-1. **Validation gate (non-negotiable):** `pytest backend/tests/test_validation_gate.py` enforces 2024 composite ±1pp of +38%, 1980/2006/2012 regime marks ±2pp. Reference values in `backend/calc/regimes.py`; calibration knob is `DEFAULT_PCT_PER_SIGMA` in `composite.py` (currently 19.0, provisional).
+1. **Validation gate (non-negotiable):** `pytest backend/tests/test_validation_gate.py` enforces four regimes — 2024 current (+31.4%), 2006 peak (+30.3%), 2012 trough (−8.0%), 1983 trough (−16.0%) — each ±2pp on overvaluation_pct and ±2-3pp on percentile_rank. Reference values in `backend/calc/regimes.py`; calibration knob is `DEFAULT_PCT_PER_SIGMA` in `composite.py` (currently 28.0, calibrated 2026-04-25). Gate runs in CI off `backend/fixtures/monthly_fact.csv`; re-generate after intentional calibration changes via the snippet in `backend/fixtures/README.md`.
 2. **Pre-1984 income stitch:** `backend/ingest/fred.py` anchors on first non-NaN month of `MEHOINUSA646N`, scales `A229RX0` to match.
 3. **Common-availability mask:** All three z-series use the same observations so the composite is stable.
 4. **No ZIP/MSA breakouts:** National scope only.
@@ -44,5 +44,5 @@ python -m backend.ingest.fred --since 2025-01-01  # Incremental FRED ingest
 
 ## Pitfalls
 - Gate failures post-backfill → suspect `pct_per_sigma` calibration (the only tunable knob)
-- Sensitivity UI incomplete (sliders, tornado, MC pending; API endpoints exist)
-- `package-lock.json` not committed yet; turn on `npm ci` after adding it
+- Sensitivity perturbation endpoints (`/sensitivity/breakpoints`, `/tornado`, `/heatmap`) must act on the latest *complete* row (`comp.index[-1]`), not `monthly.iloc[-1]` — the tail of `monthly_fact` carries fresh rates with stale (NaN) `median_income`/`median_price`, which `compute_lenses` drops
+- `fly deploy` must be invoked with `--build-arg GIT_SHA="$(git rev-parse --short HEAD)"` so `/health` reports the running commit; otherwise it returns `"git_sha":"unknown"`

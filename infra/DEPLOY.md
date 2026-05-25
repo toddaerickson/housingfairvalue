@@ -59,8 +59,11 @@ Verify: the pipeline should report 500+ monthly_fact rows and composite_history 
    Note: `ALLOWED_ORIGINS` is already set in `fly.toml`
 5. Deploy:
    ```bash
-   fly deploy
+   fly deploy --build-arg GIT_SHA="$(git rev-parse --short HEAD)"
    ```
+   The `GIT_SHA` build arg is baked into the image so `/health` reports
+   which commit is actually running. Omit and `/health` reports
+   `"git_sha":"unknown"`.
 6. Verify: `fly open /ready` — should return `{"status": "ready"}`
 
 ## 4. Deploy Frontend to Vercel

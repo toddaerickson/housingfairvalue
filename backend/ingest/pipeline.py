@@ -53,10 +53,11 @@ def _record_ingest_run(
     """Write to ingest_run table if it exists."""
     try:
         from sqlalchemy import create_engine, text
+        from ..db_url import normalize_db_url
         url = os.environ.get("DATABASE_URL")
         if not url:
             return
-        eng = create_engine(url)
+        eng = create_engine(normalize_db_url(url))
         with eng.begin() as conn:
             conn.execute(text("""
                 INSERT INTO ingest_run (since_date, rows_obs, rows_fact, status, error_detail, finished_at)
