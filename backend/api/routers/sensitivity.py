@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
 from backend.calc.affordability import piti
 from backend.calc.composite import compute_composite
@@ -255,4 +258,107 @@ def montecarlo(
         "histogram_years": list(range(1, horizon_years + 1)),
         "histogram_counts": histogram,
         "censored_count": int(np.isnan(years_to).sum()),
+    }
+
+
+class FairValueRequest(BaseModel):
+    rate: float | None = Field(None, description="30-yr mortgage rate %, e.g., 6.5")
+    price_growth: float | None = Field(None, description="annual home price growth %")
+    years: float | None = Field(None, description="years to equilibrium")
+    income_growth: float = Field(..., description="annual income growth %, required")
+    solve_for: Literal["rate", "price_growth", "years"] | None = Field(None)
+
+
+@router.post("/fair-value")
+def fair_value(req: FairValueRequest):
+    """Solve for one of {rate, price_growth, years} that makes composite_z = 0
+    at year y, given the other two and an income-growth assumption.
+
+    Forward state at year y:
+      price_y  = price_0 * (1 + price_growth/100)^y
+      income_y = income_0 * (1 + income_growth/100)^y
+      rate_y   = rate (held constant going forward)
+      oer_y    = oer_0 * (1 + income_growth/100)^y  (rent grows with income)
+
+    PTI is a *derived* readout (PITI(price_y, rate) * 12 / income_y); it does
+    not appear in the equilibrium equation.
+    """
+    monthly, _, last_date = _latest()
+    last = monthly.loc[last_date]
+    p0 = float(last["median_price"])
+    i0 = float(last["median_income"])
+    oer0 = float(last["oer_index"])
+
+    def composite_z_at(rate: float, gp: float, y: float) -> float:
+        # Guard tiny/negative y; bisection bounds keep y >= 0.5 so this is
+        # defensive only.
+        y_safe = max(y, 1e-6)
+        p_y = p0 * (1 + gp / 100.0) ** y_safe
+        i_y = i0 * (1 + req.income_growth / 100.0) ** y_safe
+        oer_y = oer0 * (1 + req.income_growth / 100.0) ** y_safe
+        m = monthly.copy(deep=True)
+        m.loc[last_date, "median_price"] = p_y
+        m.loc[last_date, "median_income"] = i_y
+        m.loc[last_date, "mortgage_rate_30y"] = rate
+        m.loc[last_date, "oer_index"] = oer_y
+        return float(compute_composite(m)["composite_z"].iloc[-1])
+
+    if req.solve_for is None:
+        if req.rate is None or req.price_growth is None or req.years is None:
+            raise HTTPException(
+                400,
+                "without solve_for, all of rate/price_growth/years must be set",
+            )
+        rate_f, gp_f, y_f = req.rate, req.price_growth, req.years
+    else:
+        bounds = {
+            "rate": (0.5, 15.0),
+            "price_growth": (-10.0, 15.0),
+            "years": (0.5, 50.0),
+        }
+        lo, hi = bounds[req.solve_for]
+
+        if req.solve_for == "rate":
+            if req.price_growth is None or req.years is None:
+                raise HTTPException(400, "solving rate requires price_growth and years")
+            gp_in, y_in = req.price_growth, req.years
+            f = lambda r: composite_z_at(r, gp_in, y_in)  # noqa: E731
+        elif req.solve_for == "price_growth":
+            if req.rate is None or req.years is None:
+                raise HTTPException(400, "solving price_growth requires rate and years")
+            r_in, y_in = req.rate, req.years
+            f = lambda g: composite_z_at(r_in, g, y_in)  # noqa: E731
+        else:  # years
+            if req.rate is None or req.price_growth is None:
+                raise HTTPException(400, "solving years requires rate and price_growth")
+            r_in, gp_in = req.rate, req.price_growth
+            f = lambda y: composite_z_at(r_in, gp_in, y)  # noqa: E731
+
+        result = _bisect_to_zero(f, lo, hi)
+        if result is None:
+            raise HTTPException(
+                422,
+                f"no solution for {req.solve_for} in [{lo}, {hi}] — "
+                "composite_z does not cross zero across this range",
+            )
+
+        rate_f = req.rate if req.solve_for != "rate" else result
+        gp_f = req.price_growth if req.solve_for != "price_growth" else result
+        y_f = req.years if req.solve_for != "years" else result
+
+    p_y_out = p0 * (1 + gp_f / 100.0) ** max(y_f, 1e-6)
+    i_y_out = i0 * (1 + req.income_growth / 100.0) ** max(y_f, 1e-6)
+    piti_monthly = float(piti(np.array([p_y_out]), np.array([rate_f]))[0])
+    pti_y = piti_monthly * 12.0 / i_y_out
+    z_final = composite_z_at(rate_f, gp_f, y_f)
+
+    return {
+        "rate": rate_f,
+        "price_growth": gp_f,
+        "years": y_f,
+        "income_growth": req.income_growth,
+        "implied_pti": pti_y,
+        "composite_z_at_y": z_final,
+        "future_price": p_y_out,
+        "future_income": i_y_out,
     }
