@@ -49,9 +49,43 @@ export type TornadoResponse = {
   bars: TornadoBar[];
 };
 
+export type FairValueSolveFor = "rate" | "price_growth" | "years";
+
+export type FairValueRequest = {
+  rate: number | null;
+  price_growth: number | null;
+  years: number | null;
+  income_growth: number;
+  solve_for: FairValueSolveFor | null;
+};
+
+export type FairValueResponse = {
+  rate: number;
+  price_growth: number;
+  years: number;
+  income_growth: number;
+  implied_pti: number;
+  composite_z_at_y: number;
+  future_price: number;
+  future_income: number;
+};
+
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(`${BASE}${path}`);
   if (!r.ok) throw new Error(`${path}: ${r.status}`);
+  return r.json();
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const detail = await r.json().catch(() => ({ detail: r.statusText }));
+    throw new Error(detail.detail ?? `${path}: ${r.status}`);
+  }
   return r.json();
 }
 
@@ -61,4 +95,5 @@ export const api = {
   regimes: () => get<{ regimes: RegimeRow[] }>("/history/regimes"),
   heatmap: () => get<{ current: { rate_pct: number; median_price: number }; cells: HeatmapCell[] }>("/sensitivity/heatmap"),
   tornado: () => get<TornadoResponse>("/sensitivity/tornado"),
+  fairValue: (body: FairValueRequest) => postJson<FairValueResponse>("/sensitivity/fair-value", body),
 };

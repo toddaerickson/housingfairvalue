@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ErrorBoundary from "./components/ErrorBoundary";
 import History from "./pages/History";
 import Sensitivity from "./pages/Sensitivity";
+import FairValue from "./pages/FairValue";
 import Methodology from "./pages/Methodology";
 import "./index.css";
 
@@ -24,6 +25,9 @@ function Shell() {
           <NavLink to="/sensitivity" className={({ isActive }) => (isActive ? "active" : "")}>
             Sensitivity
           </NavLink>
+          <NavLink to="/fair-value" className={({ isActive }) => (isActive ? "active" : "")}>
+            Fair Value
+          </NavLink>
           <NavLink to="/methodology" className={({ isActive }) => (isActive ? "active" : "")}>
             Methodology
           </NavLink>
@@ -34,6 +38,7 @@ function Shell() {
           <Routes>
             <Route path="/" element={<History />} />
             <Route path="/sensitivity" element={<Sensitivity />} />
+            <Route path="/fair-value" element={<FairValue />} />
             <Route path="/methodology" element={<Methodology />} />
           </Routes>
         </ErrorBoundary>
