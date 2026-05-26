@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -nc --arg msg \"Before compacting, review the chat session and find items mentioned that represent: to-do items, software architect deficits, bottlenecks, security gaps, code drift, spiraling complexity, problems, future needs, future desires, future possibilities, etc. Evaluate for each whether it was ignored, denied, confirmed, approved, or completed. Present items by status/category that were NOT (denied or completed). Rank-prioritize for most urgent — problems are more important than new features. Include this review at the top of the compaction summary.\" '{hookSpecificOutput:{hookEventName:\"PreCompact\",additionalContext:$msg}}'"
+          }
+        ]
+      }
+    ]
+  }
+}
